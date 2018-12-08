@@ -5,13 +5,15 @@ In this repository we have included the dash_client.c file only. We have modifie
 the various bitrate adaptive streaming algorithms like PANDA, FESTIVE, etc.
 
 To run this, simply paste this new file in the gpac folder: gpac/src/media_tools/dash_client.c
-In line# 7075 of this file, add a switch case accordingly such the concerned adaptive streaming algorithm is triggered.
+Panda is defined in a method named:
+Festive is defined in a method named:
+BBA is defined in a method named:
+BOLA is defined in a method named:
 
-
-Also we need to make some changes to the following file: gpac/modules/mpd_in/mpd_in.c file in order for the gpac player to use the concerned adaptive algorithm.
+Also we need to make some changes to the following file: gpac/modules/mpd_in/mpd_in.c file in order for the gpac player to use the desired adaptive algorithm.
 The change goes in line# 1047.  ADD this: mpdin->adaptation_algorithm = GF_DASH_ALGO_XXXXXXXX;
-where XXXXXX signifies which algorithm we are running. It will be FESTIVE for FESTIVE, BBA for BBA0 ... etc
-This will tell the player to use the concerned adaptive streaming algorithm.
+where XXXXXX signifies which algorithm we are running. It will be FESTIVE for FESTIVE, BBA for BBA0, PANDA for PANDA and BOLA for BOLA.
+This will tell the player to use the respective adaptive streaming algorithm.
 
 
 Also we gave made some more changes to the __dash_group structure (defined in line# 208 of dash_client.c file) to account for that fact that we needed previous throughput history for calculation of throughput based algorithms. We added the following members:
@@ -34,3 +36,7 @@ Also we gave made some more changes to the __dash_group structure (defined in li
 
 
 Swtiches.py file is used to calculate the experimental data. After each segment is downloaded we are keeping track of quality of that segment, storing all these segments in a file and using this file to calculate the no of switches, mean and max video qualtiy representation.
+
+app.js file is used by server to host video content.
+
+We have also hosted a sample of segmented video content in different representations and the manifest file here:
