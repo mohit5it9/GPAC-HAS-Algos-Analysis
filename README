@@ -1,0 +1,33 @@
+In this repository we have included the dash_client.c file only. We have modified the dash_client.c file and included the code and functions we wrote to implement
+the various bitrate adaptive streaming algorithms like PANDA, FESTIVE, etc.
+
+To run this, simply paste this new file in the gpac folder: gpac/src/media_tools/dash_client.c
+In line# 7075 of this file, add a switch case accordingly such the concerned adaptive streaming algorithm is triggered.
+
+
+Also we need to make some changes to the following file: gpac/modules/mpd_in/mpd_in.c file in order for the gpac player to use the concerned adaptive algorithm.
+The change goes in line# 1047.  ADD this: mpdin->adaptation_algorithm = GF_DASH_ALGO_XXXXXXXX;
+where XXXXXX signifies which algorithm we are running. It will be FESTIVE for FESTIVE, BBA for BBA0 ... etc
+This will tell the player to use the concerned adaptive streaming algorithm.
+
+
+Also we gave made some more changes to the __dash_group structure (defined in line# 208 of dash_client.c file) to account for that fact that we needed previous throughput history for calculation of throughput based algorithms. We added the following members:
+
+	//For panda
+	double last_bandwidth_share;
+	double last_smooth_bandwidth_share;
+	GF_List *throughput_history;
+	u32 last_interrequest_time;
+	u32 inter_request_time;
+ We created a new structure to store the throughput history:
+ typedef struct
+{
+	double throughput;
+	u32 transmissionEnd;
+	u32 transmissionRequested;
+	s32 repIndex;
+} GF_ThroughputHistory;
+
+
+
+Swtiches.py file is used to calculate the experimental data. After each segment is downloaded we are keeping track of quality of that segment, storing all these segments in a file and using this file to calculate the no of switches, mean and max video qualtiy representation.
