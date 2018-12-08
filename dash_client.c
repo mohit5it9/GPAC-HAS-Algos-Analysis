@@ -32,7 +32,7 @@
 #include <gpac/base_coding.h>
 #include <string.h>
 #include <sys/stat.h>
-
+#include <stdio.h>
 #ifdef _WIN32_WCE
 #include <winbase.h>
 #else
@@ -196,7 +196,7 @@ typedef enum
 	GF_DASH_GROUP_SELECTED,
 } GF_DASHGroupSelection;
 
-typedef struct 
+typedef struct
 {
 	double throughput;
 	u32 transmissionEnd;
@@ -2916,7 +2916,6 @@ static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *grou
 												  u32 dl_rate, Double speed, Double max_available_speed, Bool force_lower_complexity,
 												  GF_MPD_Representation *rep, Bool go_up_bitrate)
 {
-	fprintf(stderr, "IN BBA\n");
 	u32 rate_plus;
 	u32 rate_minus;
 	u32 rate_prev = group->active_bitrate;
@@ -2967,7 +2966,7 @@ static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *grou
 	if (r < segment_duration_ms) {
 		r = segment_duration_ms;
 	}
-	cu = (u32)((90-37.5)*group->buffer_max_ms / 100);
+	cu = (u32)((99-37.5)*group->buffer_max_ms / 100);
 
 	if (buf_now <= r) {
 		f_buf_now = rate_min;
@@ -3014,10 +3013,8 @@ static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *grou
 s32 FindLargest_panda(GF_DASH_Group *group, double smoothBandwidthShare, double delta, int highest_rep_index) {
 	s32 largestBitrateIndex = 0;
 	for (s32 i = 0; i < highest_rep_index; i++) {
-		fprintf(stderr, "entering %d \n", highest_rep_index );
 		u32 currentBitrate;
 		currentBitrate = ((GF_MPD_Representation *)gf_list_get(group->adaptation_set->representations, i))->bandwidth/8;
-		fprintf(stderr, "hello %d %f \n", currentBitrate, smoothBandwidthShare - delta);
 		if (currentBitrate <= (smoothBandwidthShare - delta)) {
 			largestBitrateIndex = i;
 		}
@@ -3025,40 +3022,29 @@ s32 FindLargest_panda(GF_DASH_Group *group, double smoothBandwidthShare, double 
 	return largestBitrateIndex;
 }
 
-
+// our implementation of the panda algorithm
 static s32 dash_do_rate_adaptation_panda(GF_DashClient *dash, GF_DASH_Group *group, GF_DASH_Group *base_group,
 		  	  	  	  	  	  	  	  	  u32 dl_rate, Double speed, Double max_available_speed, Bool force_lower_complexity,
 										  	  GF_MPD_Representation *rep, Bool go_up_bitrate)
 {
 	double kappa = 0.28;
-	double omega = 0.3;
+	double omega = 0.01;
 	double alpha = 0.2;
 	//double beta = 0.2;
 	double epsilon = 0.15;
-	//u32 b_min = group->buffer_min_ms;
 	u32 timeNow = gf_sys_clock();
 	int highest_rep_index = gf_list_count(group->adaptation_set->representations) - 1;
 	assert(highest_rep_index >= 0);
-
+	// calculate the throughput measured
 	double throughputMeasured = ((group->active_bitrate * group->segment_duration) / (group->last_segment_time - group->download_start_time));
-	//fprintf(stderr, "%f throughputMeasured \n", throughputMeasured);
-
+	// init data for first iteration of video playback as we don't have any previous history
 	if (group->download_segment_index <= 1)
 	{
 		group->last_bandwidth_share = throughputMeasured;
 		group->last_smooth_bandwidth_share = throughputMeasured;
-		//group->bitrate_history = gf_list_new();
+		group->last_interrequest_time = timeNow;
 	}
-	//fprintf(stderr, "nb_segments_done%d.  Active bitrate %d\n",group->download_segment_index, group->active_bitrate );
-
-	// u32 *lastBitrate;
-	// lastBitrate = group->active_bitrate;
-	// GF_DASHBitrateHistory bh;
-	// bh.current_Bitrate = group->active_bitrate;
-	// GF_DASHBitrateHistory *bh1;
-	// bh1 = &bh;
-	// gf_list_insert(group->bitrate_history,bh1,gf_list_count(group->bitrate_history));
-	//fprintf(stderr, "BABU\n");
+	// calculate the inter request time
 	u32 actualInterrequestTime;
   	if (timeNow - group->download_start_time > group->last_interrequest_time)
     {
@@ -3068,36 +3054,32 @@ static s32 dash_do_rate_adaptation_panda(GF_DashClient *dash, GF_DASH_Group *gro
     {
     	actualInterrequestTime = group->last_interrequest_time;
     }
-    
-    double bandwidthShare = (kappa * (omega - MAX(0.0, group->last_bandwidth_share - throughputMeasured + omega))) * actualInterrequestTime + group->last_bandwidth_share;
-    //fprintf(stderr, "\n%f bandwidth share \n", bandwidthShare);
+    group->last_interrequest_time = actualInterrequestTime;
+    double bandwidthShare = (omega + MAX(0.0, group->last_bandwidth_share - throughputMeasured)) * actualInterrequestTime + group->last_bandwidth_share;
   	if (bandwidthShare < 0)
     {
     	bandwidthShare = 0;
     }
   	group->last_bandwidth_share = bandwidthShare;
-  	
+
   	double smoothBandwidthShare;
-  	smoothBandwidthShare = ((-alpha
-                           * (group->last_smooth_bandwidth_share - bandwidthShare))
-                          * actualInterrequestTime)
+    smoothBandwidthShare = ((group->last_smooth_bandwidth_share - bandwidthShare)
+                          * actualInterrequestTime/1e6)
     + group->last_smooth_bandwidth_share;
 
     group->last_smooth_bandwidth_share = smoothBandwidthShare;
-  	
-  	double deltaUp = omega + (epsilon * smoothBandwidthShare);
+    // calculate delta up and down
+  	double deltaUp = omega + epsilon * smoothBandwidthShare;
   	double deltaDown = omega;
+  	// find largest available index
   	s32 rUp = FindLargest_panda (group, smoothBandwidthShare, deltaUp, highest_rep_index);
   	s32 rDown = FindLargest_panda (group, smoothBandwidthShare, deltaDown, highest_rep_index);
-  	fprintf(stderr, "rUp %d   rDown  %d smoothBandwidthShare %f ",rUp,rDown, smoothBandwidthShare);
   	s32 newIndex;
   	u32 rateUp;
   	u32 rateDown;
   	rateUp = ((GF_MPD_Representation *)gf_list_get(group->adaptation_set->representations, rUp))->bandwidth/8;
   	rateDown = ((GF_MPD_Representation *)gf_list_get(group->adaptation_set->representations, rDown))->bandwidth/8;
-  	// GF_DASHBitrateHistory *downBitrate;
-  	// downBitrate = gf_list_get(group->bitrate_history,rDown);
-  	//fprintf(stderr, "current%d   up%d    down%d\n", group->active_bitrate,rateUp, rateDown );
+  	// determine the next representation quality index
   	if (group->active_bitrate < rateUp)
     {
     	newIndex = rUp;
@@ -3111,7 +3093,14 @@ static s32 dash_do_rate_adaptation_panda(GF_DashClient *dash, GF_DASH_Group *gro
     {
     	newIndex = rDown;
     }
-    fprintf(stderr, "print7%d\n",newIndex);
+    // write to a file to store the quality index at each given time
+    FILE *fp1;
+    fp1 = fopen("rep.txt", "a");
+    fprintf(fp1, "%d\n", newIndex);
+    fclose(fp1);
+    fp1 = fopen("buf.txt", "a");
+    fprintf(fp1, "%d\n", group->buffer_occupancy_ms);
+    fclose(fp1);
   	return newIndex;
 
 }
@@ -3129,6 +3118,7 @@ static u32 max(u32 a, u32 b)
 		return a;
 	return b;
 }
+// our implementation of the festive adaption algorithm
 static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *group, GF_DASH_Group *base_group,
 		  	  	  	  	  	  	  	  	  u32 dl_rate, Double speed, Double max_available_speed, Bool force_lower_complexity,
 										  	  GF_MPD_Representation *rep, Bool go_up_bitrate)
@@ -3144,7 +3134,6 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
 	int decisionMade = 0;
 	if (group->download_segment_index <= 1)
 	{
-		fprintf(stderr, "BABUUUUUU");
 		group->inter_request_time = 0;
 		group->throughput_history = gf_list_new();
 		return 0;
@@ -3166,7 +3155,6 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
 	GF_ThroughputHistory *th;
 	th = (GF_ThroughputHistory*) malloc(sizeof(GF_ThroughputHistory));
 	th->throughput = throughputMeasured;
-	fprintf(stderr, "throughputMeasured %f %f\n", throughputMeasured, th->throughput);
 	int idx = gf_list_count(group->throughput_history);
 	gf_list_add(group->throughput_history,th);
 	//Not enough completed requests
@@ -3175,11 +3163,9 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
 		group->inter_request_time = 0;
 		return 0;
 	}
-	// compute throughput estimation
-  	//GF_List *thrptEstimationTmp;
+	// computes the throughput estimation
   	double thrptEstimationTmp[10000] = {};
   	int count = 0;
-  	//thrptEstimationTmp = gf_list_new();
 	for (unsigned sd = gf_list_count(group->throughput_history)-1; sd-- > 0; )
     {
     	GF_ThroughputHistory *throughputATsd;
@@ -3190,13 +3176,6 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
         }
       	else
         {
-        	// double *tempThrpt;
-        	// tempThrpt = (double*) malloc(sizeof(double));
-        	// *tempThrpt = (8.0 * throughputATsd->throughput)
-         //                                / ((double)(throughputATsd->transmissionEnd - throughputATsd->transmissionRequested) / 1000000.0);
-
-            //gf_list_insert(thrptEstimationTmp,tempThrpt,gf_list_count(thrptEstimationTmp));
-            //fprintf(stderr, "\nthroughputATsd->throughput %f %f\n", throughputATsd->throughput, (double)(throughputATsd->transmissionEnd - throughputATsd->transmissionRequested));
             thrptEstimationTmp[count] = (8.0 * throughputATsd->throughput)
                                         / ((double)(throughputATsd->transmissionEnd - throughputATsd->transmissionRequested));
             count++;
@@ -3207,12 +3186,12 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
           	break;
         }
     }
+    // calculates the harmonic denominator
     double harmonicMeanDenominator = 0;
   	for (u32 i = 0; i < count; i++)
     {
       	harmonicMeanDenominator += (1 / thrptEstimationTmp[i]);
     }
-    //fprintf(stderr, "\ncount %d %f\n", count, harmonicMeanDenominator);
   	double thrptEstimation = (double)(count / harmonicMeanDenominator);
 
   	u32 lowerBound = targetBuf - delta;
@@ -3226,7 +3205,6 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
     {
     	group->inter_request_time = bufferNow - randBuf;
     }
-    fprintf(stderr, "print5\n");
     s32 currentRepIndex = group->active_rep_index;
   	s32 refIndex = currentRepIndex;
 
@@ -3238,15 +3216,14 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
     	decisionMade = 1;
     }
 
-
+    // check the currentRepIndex
     if (currentRepIndex < highest_rep_index && !decisionMade)
     {
     	int count1 = 0;
     	for (unsigned sd = gf_list_count(group->throughput_history)-1; sd-- > 0; )
-    	{	
+    	{
     		GF_ThroughputHistory *throughputATsd;
     		throughputATsd = gf_list_get(group->throughput_history,sd);
-    		fprintf(stderr, " print 555 sd %d rep %d \n", sd, throughputATsd->repIndex);
       	  	if (currentRepIndex == throughputATsd->repIndex)
             {
               	count1++;
@@ -3260,7 +3237,6 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
               	break;
             }
         }
-      fprintf(stderr, "print55 %d\n",count1);
       u32 bitratAtCurrentRep = ((GF_MPD_Representation *)gf_list_get(group->adaptation_set->representations, currentRepIndex+1))->bandwidth/8;
       fprintf(stderr, "%d %f\n", bitratAtCurrentRep, thrptEstimation);
       if (count1 >= 1
@@ -3270,13 +3246,11 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
           decisionMade = 1;
         }
     }
-    fprintf(stderr, "print6");
     // neither did we increase nor decrease, so we stay at the same rep index
   	if (!decisionMade)
     {
       	return currentRepIndex;
     }
-    fprintf(stderr, "hello there" );
     // compute number of bit rate switches in the last 20 seconds
   	u32 numberOfSwitches = 0;
   	u32 foundIndices[10000] = {};
@@ -3310,7 +3284,7 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
           	count++;
         }
     }
-    fprintf(stderr, "print7");
+    // compute the scores
     u32 bitratAtCurrentRep = ((GF_MPD_Representation *)gf_list_get(group->adaptation_set->representations, currentRepIndex))->bandwidth*8;
     u32 bitrateAtrefIndex = ((GF_MPD_Representation *)gf_list_get(group->adaptation_set->representations, refIndex))->bandwidth*8;
 
@@ -3321,8 +3295,6 @@ static s32 dash_do_rate_adaptation_festive(GF_DashClient *dash, GF_DASH_Group *g
 
   	double scoreStabilityCurrent = pow (2.0, (double)numberOfSwitches);
   	double scoreStabilityRef = pow (2.0, ((double)numberOfSwitches)) + 1.0;
-
-  	fprintf(stderr, "\nscores%f %f\n",scoreEfficiencyCurrent,scoreEfficiencyRef );
 
   	if ((scoreStabilityCurrent + (alpha * scoreEfficiencyCurrent)) < (scoreStabilityRef + (alpha * scoreEfficiencyRef)))
     {
@@ -3364,8 +3336,6 @@ static s32 dash_do_rate_adaptation_bola(GF_DashClient *dash, GF_DASH_Group *grou
 		  	  	  	  	  	  	  	  	  u32 dl_rate, Double speed, Double max_available_speed, Bool force_lower_complexity,
 										  	  GF_MPD_Representation *rep, Bool go_up_bitrate)
 {
-
-	fprintf(stderr, "IN BOLA");
 	s32 new_index = -1;
 	u32 k;
 	Double p = group->current_downloaded_segment_duration / 1000.0;	// segment duration
@@ -7104,7 +7074,7 @@ void gf_dash_set_algo(GF_DashClient *dash, GF_DASHAdaptationAlgorithm algo)
 		break;
 	case GF_DASH_ALGO_BBA0:
 		fprintf(stderr,"\n Clling legacy bba");
-		dash->rate_adaptation_algo = dash_do_rate_adaptation_festive;
+		dash->rate_adaptation_algo = dash_do_rate_adaptation_bba0;
 		dash->rate_adaptation_download_monitor = dash_do_rate_monitor_default;
 		break;
 	case GF_DASH_ALGO_BOLA_FINITE:
