@@ -2907,11 +2907,6 @@ static u32 get_max_rate_below(GF_List *representations, double rate, s32 *index)
 	return max_rate;
 }
 
-/**
-Adaptation Algorithm as described in
-	T.-Y. Huang et al. 2014. A buffer-based approach to rate adaptation: evidence from a large video streaming service.
-	In Proceedings of the 2014 ACM conference on SIGCOMM (SIGCOMM '14).
-*/
 static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *group, GF_DASH_Group *base_group,
 												  u32 dl_rate, Double speed, Double max_available_speed, Bool force_lower_complexity,
 												  GF_MPD_Representation *rep, Bool go_up_bitrate)
@@ -2936,7 +2931,6 @@ static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *grou
 	   NOTE: This is not described in the paper
 	*/
 	if (group->buffer_occupancy_ms + segment_duration_ms > group->buffer_max_ms) {
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[DASH] BBA-0: not enough space to download new segment: %d\n", group->buffer_occupancy_ms));
 		return -1;
 	}
 
@@ -2959,7 +2953,6 @@ static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *grou
 	 * the rate map is piece-wise
      */
 	if (group->buffer_max_ms <= segment_duration_ms) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("[DASH] BBA-0: cannot initialize BBA-0 given the buffer size (%d) and segment duration (%d)\n", group->buffer_max_ms, group->segment_duration*1000));
 		return -1;
 	}
 	r = (u32)(37.5*group->buffer_max_ms / 100);
@@ -3005,7 +2998,6 @@ static s32 dash_do_rate_adaptation_bba0(GF_DashClient *dash, GF_DASH_Group *grou
 		GF_MPD_Representation *result = gf_list_get(group->adaptation_set->representations, (u32)new_index);
 		// increment the segment number for debug purposes
 		group->current_index++;
-		GF_LOG(GF_LOG_INFO, GF_LOG_DASH, ("[DASH] BBA-0: buffer %d ms, segment number %d, new quality %d with rate %d\n", group->buffer_occupancy_ms, group->current_index, new_index, result->bandwidth));
 	}
 	return new_index;
 }
@@ -7075,6 +7067,16 @@ void gf_dash_set_algo(GF_DashClient *dash, GF_DASHAdaptationAlgorithm algo)
 	case GF_DASH_ALGO_BBA0:
 		fprintf(stderr,"\n Clling legacy bba");
 		dash->rate_adaptation_algo = dash_do_rate_adaptation_bba0;
+		dash->rate_adaptation_download_monitor = dash_do_rate_monitor_default;
+		break;
+	case GF_DASH_ALGO_PANDA:
+		fprintf(stderr,"\n Clling legacy panda");
+		dash->rate_adaptation_algo = dash_do_rate_adaptation_panda;
+		dash->rate_adaptation_download_monitor = dash_do_rate_monitor_default;
+		break;
+	case GF_DASH_ALGO_FESTIVE:
+		fprintf(stderr,"\n Clling legacy festive");
+		dash->rate_adaptation_algo = dash_do_rate_adaptation_festive;
 		dash->rate_adaptation_download_monitor = dash_do_rate_monitor_default;
 		break;
 	case GF_DASH_ALGO_BOLA_FINITE:
