@@ -1,6 +1,5 @@
 FCN - CSE534 Final project report
 
-
 In this repository we have included the dash_client.c file only. We have modified the dash_client.c file and included the code and functions we wrote to implement
 the various bitrate adaptive streaming algorithms like PANDA, FESTIVE, etc.
 
